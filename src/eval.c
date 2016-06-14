@@ -349,6 +349,7 @@ static struct vimvar
     {VV_NAME("fcs_choice",	 VAR_STRING), 0},
     {VV_NAME("beval_bufnr",	 VAR_NUMBER), VV_RO},
     {VV_NAME("beval_winnr",	 VAR_NUMBER), VV_RO},
+    {VV_NAME("beval_winid",	 VAR_NUMBER), VV_RO},
     {VV_NAME("beval_lnum",	 VAR_NUMBER), VV_RO},
     {VV_NAME("beval_col",	 VAR_NUMBER), VV_RO},
     {VV_NAME("beval_text",	 VAR_STRING), VV_RO},
@@ -358,6 +359,7 @@ static struct vimvar
     {VV_NAME("swapcommand",	 VAR_STRING), VV_RO},
     {VV_NAME("char",		 VAR_STRING), 0},
     {VV_NAME("mouse_win",	 VAR_NUMBER), 0},
+    {VV_NAME("mouse_winid",	 VAR_NUMBER), 0},
     {VV_NAME("mouse_lnum",	 VAR_NUMBER), 0},
     {VV_NAME("mouse_col",	 VAR_NUMBER), 0},
     {VV_NAME("operator",	 VAR_STRING), VV_RO},
@@ -499,6 +501,7 @@ static void f_buflisted(typval_T *argvars, typval_T *rettv);
 static void f_bufloaded(typval_T *argvars, typval_T *rettv);
 static void f_bufname(typval_T *argvars, typval_T *rettv);
 static void f_bufnr(typval_T *argvars, typval_T *rettv);
+static void f_bufwinid(typval_T *argvars, typval_T *rettv);
 static void f_bufwinnr(typval_T *argvars, typval_T *rettv);
 static void f_byte2line(typval_T *argvars, typval_T *rettv);
 static void byteidx(typval_T *argvars, typval_T *rettv, int comp);
@@ -817,6 +820,7 @@ static void f_test_null_job(typval_T *argvars, typval_T *rettv);
 static void f_test_null_list(typval_T *argvars, typval_T *rettv);
 static void f_test_null_partial(typval_T *argvars, typval_T *rettv);
 static void f_test_null_string(typval_T *argvars, typval_T *rettv);
+static void f_test_settime(typval_T *argvars, typval_T *rettv);
 #ifdef FEAT_FLOAT
 static void f_tan(typval_T *argvars, typval_T *rettv);
 static void f_tanh(typval_T *argvars, typval_T *rettv);
@@ -4627,7 +4631,26 @@ eval4(char_u **arg, typval_T *rettv, int evaluate)
 		    clear_tv(&var2);
 		    return FAIL;
 		}
-		n1 = tv_equal(rettv, &var2, FALSE, FALSE);
+		if ((rettv->v_type == VAR_PARTIAL
+					     && rettv->vval.v_partial == NULL)
+			|| (var2.v_type == VAR_PARTIAL
+					      && var2.vval.v_partial == NULL))
+		    /* when a partial is NULL assume not equal */
+		    n1 = FALSE;
+		else if (type_is)
+		{
+		    if (rettv->v_type == VAR_FUNC && var2.v_type == VAR_FUNC)
+			/* strings are considered the same if their value is
+			 * the same */
+			n1 = tv_equal(rettv, &var2, ic, FALSE);
+		    else if (rettv->v_type == VAR_PARTIAL
+						&& var2.v_type == VAR_PARTIAL)
+			n1 = (rettv->vval.v_partial == var2.vval.v_partial);
+		    else
+			n1 = FALSE;
+		}
+		else
+		    n1 = tv_equal(rettv, &var2, ic, FALSE);
 		if (type == TYPE_NEQUAL)
 		    n1 = !n1;
 	    }
@@ -6258,6 +6281,58 @@ dict_equal(
 
 static int tv_equal_recurse_limit;
 
+    static int
+func_equal(
+    typval_T *tv1,
+    typval_T *tv2,
+    int	     ic)	    /* ignore case */
+{
+    char_u	*s1, *s2;
+    dict_T	*d1, *d2;
+    int		a1, a2;
+    int		i;
+
+    /* empty and NULL function name considered the same */
+    s1 = tv1->v_type == VAR_FUNC ? tv1->vval.v_string
+					   : tv1->vval.v_partial->pt_name;
+    if (s1 != NULL && *s1 == NUL)
+	s1 = NULL;
+    s2 = tv2->v_type == VAR_FUNC ? tv2->vval.v_string
+					   : tv2->vval.v_partial->pt_name;
+    if (s2 != NULL && *s2 == NUL)
+	s2 = NULL;
+    if (s1 == NULL || s2 == NULL)
+    {
+	if (s1 != s2)
+	    return FALSE;
+    }
+    else if (STRCMP(s1, s2) != 0)
+	return FALSE;
+
+    /* empty dict and NULL dict is different */
+    d1 = tv1->v_type == VAR_FUNC ? NULL : tv1->vval.v_partial->pt_dict;
+    d2 = tv2->v_type == VAR_FUNC ? NULL : tv2->vval.v_partial->pt_dict;
+    if (d1 == NULL || d2 == NULL)
+    {
+	if (d1 != d2)
+	    return FALSE;
+    }
+    else if (!dict_equal(d1, d2, ic, TRUE))
+	return FALSE;
+
+    /* empty list and no list considered the same */
+    a1 = tv1->v_type == VAR_FUNC ? 0 : tv1->vval.v_partial->pt_argc;
+    a2 = tv2->v_type == VAR_FUNC ? 0 : tv2->vval.v_partial->pt_argc;
+    if (a1 != a2)
+	return FALSE;
+    for (i = 0; i < a1; ++i)
+	if (!tv_equal(tv1->vval.v_partial->pt_argv + i,
+		      tv2->vval.v_partial->pt_argv + i, ic, TRUE))
+	    return FALSE;
+
+    return TRUE;
+}
+
 /*
  * Return TRUE if "tv1" and "tv2" have the same value.
  * Compares the items just like "==" would compare them, but strings and
@@ -6275,22 +6350,6 @@ tv_equal(
     static int  recursive_cnt = 0;	    /* catch recursive loops */
     int		r;
 
-    /* For VAR_FUNC and VAR_PARTIAL only compare the function name. */
-    if ((tv1->v_type == VAR_FUNC
-		|| (tv1->v_type == VAR_PARTIAL && tv1->vval.v_partial != NULL))
-	    && (tv2->v_type == VAR_FUNC
-		|| (tv2->v_type == VAR_PARTIAL && tv2->vval.v_partial != NULL)))
-    {
-	s1 = tv1->v_type == VAR_FUNC ? tv1->vval.v_string
-					       : tv1->vval.v_partial->pt_name;
-	s2 = tv2->v_type == VAR_FUNC ? tv2->vval.v_string
-					       : tv2->vval.v_partial->pt_name;
-	return (s1 != NULL && s2 != NULL && STRCMP(s1, s2) == 0);
-    }
-
-    if (tv1->v_type != tv2->v_type)
-	return FALSE;
-
     /* Catch lists and dicts that have an endless loop by limiting
      * recursiveness to a limit.  We guess they are equal then.
      * A fixed limit has the problem of still taking an awful long time.
@@ -6304,6 +6363,21 @@ tv_equal(
 	--tv_equal_recurse_limit;
 	return TRUE;
     }
+
+    /* For VAR_FUNC and VAR_PARTIAL only compare the function name. */
+    if ((tv1->v_type == VAR_FUNC
+		|| (tv1->v_type == VAR_PARTIAL && tv1->vval.v_partial != NULL))
+	    && (tv2->v_type == VAR_FUNC
+		|| (tv2->v_type == VAR_PARTIAL && tv2->vval.v_partial != NULL)))
+    {
+	++recursive_cnt;
+	r = func_equal(tv1, tv2, ic);
+	--recursive_cnt;
+	return r;
+    }
+
+    if (tv1->v_type != tv2->v_type)
+	return FALSE;
 
     switch (tv1->v_type)
     {
@@ -8417,6 +8491,7 @@ static struct fst
     {"bufloaded",	1, 1, f_bufloaded},
     {"bufname",		1, 1, f_bufname},
     {"bufnr",		1, 2, f_bufnr},
+    {"bufwinid",	1, 1, f_bufwinid},
     {"bufwinnr",	1, 1, f_bufwinnr},
     {"byte2line",	1, 1, f_byte2line},
     {"byteidx",		2, 2, f_byteidx},
@@ -8735,13 +8810,14 @@ static struct fst
 #ifdef FEAT_JOB_CHANNEL
     {"test_null_channel", 0, 0, f_test_null_channel},
 #endif
-    {"test_null_dict", 0, 0, f_test_null_dict},
+    {"test_null_dict",	0, 0, f_test_null_dict},
 #ifdef FEAT_JOB_CHANNEL
-    {"test_null_job", 0, 0, f_test_null_job},
+    {"test_null_job",	0, 0, f_test_null_job},
 #endif
-    {"test_null_list", 0, 0, f_test_null_list},
+    {"test_null_list",	0, 0, f_test_null_list},
     {"test_null_partial", 0, 0, f_test_null_partial},
     {"test_null_string", 0, 0, f_test_null_string},
+    {"test_settime",	1, 1, f_test_settime},
 #ifdef FEAT_TIMERS
     {"timer_start",	2, 3, f_timer_start},
     {"timer_stop",	1, 1, f_timer_stop},
@@ -10142,11 +10218,8 @@ f_bufnr(typval_T *argvars, typval_T *rettv)
 	rettv->vval.v_number = -1;
 }
 
-/*
- * "bufwinnr(nr)" function
- */
     static void
-f_bufwinnr(typval_T *argvars, typval_T *rettv)
+buf_win_common(typval_T *argvars, typval_T *rettv, int get_nr)
 {
 #ifdef FEAT_WINDOWS
     win_T	*wp;
@@ -10164,11 +10237,30 @@ f_bufwinnr(typval_T *argvars, typval_T *rettv)
 	if (wp->w_buffer == buf)
 	    break;
     }
-    rettv->vval.v_number = (wp != NULL ? winnr : -1);
+    rettv->vval.v_number = (wp != NULL ? (get_nr ? winnr : wp->w_id) : -1);
 #else
-    rettv->vval.v_number = (curwin->w_buffer == buf ? 1 : -1);
+    rettv->vval.v_number = (curwin->w_buffer == buf
+					  ? (get_nr ? 1 : curwin->w_id) : -1);
 #endif
     --emsg_off;
+}
+
+/*
+ * "bufwinid(nr)" function
+ */
+    static void
+f_bufwinid(typval_T *argvars, typval_T *rettv)
+{
+    buf_win_common(argvars, rettv, FALSE);
+}
+
+/*
+ * "bufwinnr(nr)" function
+ */
+    static void
+f_bufwinnr(typval_T *argvars, typval_T *rettv)
+{
+    buf_win_common(argvars, rettv, TRUE);
 }
 
 /*
@@ -12666,6 +12758,7 @@ f_getchar(typval_T *argvars, typval_T *rettv)
     --allow_keys;
 
     vimvars[VV_MOUSE_WIN].vv_nr = 0;
+    vimvars[VV_MOUSE_WINID].vv_nr = 0;
     vimvars[VV_MOUSE_LNUM].vv_nr = 0;
     vimvars[VV_MOUSE_COL].vv_nr = 0;
 
@@ -12728,6 +12821,7 @@ f_getchar(typval_T *argvars, typval_T *rettv)
 		    ++winnr;
 # endif
 		vimvars[VV_MOUSE_WIN].vv_nr = winnr;
+		vimvars[VV_MOUSE_WINID].vv_nr = win->w_id;
 		vimvars[VV_MOUSE_LNUM].vv_nr = lnum;
 		vimvars[VV_MOUSE_COL].vv_nr = col + 1;
 	    }
@@ -13481,11 +13575,18 @@ find_win_by_nr(
 
     for (wp = (tp == NULL || tp == curtab) ? firstwin : tp->tp_firstwin;
 						  wp != NULL; wp = wp->w_next)
-	if (--nr <= 0)
+	if (nr >= LOWEST_WIN_ID)
+	{
+	    if (wp->w_id == nr)
+		return wp;
+	}
+	else if (--nr <= 0)
 	    break;
+    if (nr >= LOWEST_WIN_ID)
+	return NULL;
     return wp;
 #else
-    if (nr == 0 || nr == 1)
+    if (nr == 0 || nr == 1 || nr == curwin->w_id)
 	return curwin;
     return NULL;
 #endif
@@ -20777,7 +20878,7 @@ f_test_garbagecollect_now(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
 
 #ifdef FEAT_JOB_CHANNEL
     static void
-f_test_null_channel(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
+f_test_null_channel(typval_T *argvars UNUSED, typval_T *rettv)
 {
     rettv->v_type = VAR_CHANNEL;
     rettv->vval.v_channel = NULL;
@@ -20785,7 +20886,7 @@ f_test_null_channel(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
 #endif
 
     static void
-f_test_null_dict(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
+f_test_null_dict(typval_T *argvars UNUSED, typval_T *rettv)
 {
     rettv->v_type = VAR_DICT;
     rettv->vval.v_dict = NULL;
@@ -20793,7 +20894,7 @@ f_test_null_dict(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
 
 #ifdef FEAT_JOB_CHANNEL
     static void
-f_test_null_job(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
+f_test_null_job(typval_T *argvars UNUSED, typval_T *rettv)
 {
     rettv->v_type = VAR_JOB;
     rettv->vval.v_job = NULL;
@@ -20801,24 +20902,30 @@ f_test_null_job(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
 #endif
 
     static void
-f_test_null_list(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
+f_test_null_list(typval_T *argvars UNUSED, typval_T *rettv)
 {
     rettv->v_type = VAR_LIST;
     rettv->vval.v_list = NULL;
 }
 
     static void
-f_test_null_partial(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
+f_test_null_partial(typval_T *argvars UNUSED, typval_T *rettv)
 {
     rettv->v_type = VAR_PARTIAL;
     rettv->vval.v_partial = NULL;
 }
 
     static void
-f_test_null_string(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
+f_test_null_string(typval_T *argvars UNUSED, typval_T *rettv)
 {
     rettv->v_type = VAR_STRING;
     rettv->vval.v_string = NULL;
+}
+
+    static void
+f_test_settime(typval_T *argvars, typval_T *rettv UNUSED)
+{
+    time_for_testing = (time_t)get_tv_number(&argvars[0]);
 }
 
 #if defined(FEAT_JOB_CHANNEL) || defined(FEAT_TIMERS) || defined(PROTO)

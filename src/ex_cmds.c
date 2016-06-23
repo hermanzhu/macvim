@@ -1983,6 +1983,8 @@ write_viminfo(char_u *file, int forceit)
 		     */
 		    if (*wp == 'a')
 		    {
+			EMSG2(_("E929: Too many viminfo temp files, like %s!"),
+								    tempname);
 			vim_free(tempname);
 			tempname = NULL;
 			break;
@@ -2164,9 +2166,13 @@ do_viminfo(FILE *fp_in, FILE *fp_out, int flags)
     {
 	if (flags & VIF_WANT_INFO)
 	{
-	    /* Registers are read and newer ones are used when writing. */
 	    if (fp_out != NULL)
+	    {
+		/* Registers and marks are read and kept separate from what
+		 * this Vim is using.  They are merged when writing. */
 		prepare_viminfo_registers();
+		prepare_viminfo_marks();
+	    }
 
 	    eof = read_viminfo_up_to_marks(&vir,
 					 flags & VIF_FORCEIT, fp_out != NULL);
@@ -2200,6 +2206,7 @@ do_viminfo(FILE *fp_in, FILE *fp_out, int flags)
 	write_viminfo_varlist(fp_out);
 #endif
 	write_viminfo_filemarks(fp_out);
+	finish_viminfo_marks();
 	write_viminfo_bufferlist(fp_out);
 	write_viminfo_barlines(&vir, fp_out);
 	count = write_viminfo_marks(fp_out);
@@ -2303,7 +2310,11 @@ read_viminfo_up_to_marks(
 		break;
 	    case '-':
 	    case '\'':
-		eof = read_viminfo_filemark(virp, forceit);
+		/* When file marks are in bar lines skip the old style lines. */
+		if (virp->vir_version < VIMINFO_VERSION_WITH_MARKS)
+		    eof = read_viminfo_filemark(virp, forceit);
+		else
+		    eof = viminfo_readline(virp);
 		break;
 	    default:
 		if (viminfo_error("E575: ", _("Illegal starting char"),
@@ -2548,8 +2559,9 @@ barline_writestring(FILE *fd, char_u *s, int remaining_start)
 /*
  * Parse a viminfo line starting with '|'.
  * Add each decoded value to "values".
+ * Returns TRUE if the next line is to be read after using the parsed values.
  */
-    static void
+    static int
 barline_parse(vir_T *virp, char_u *text, garray_T *values)
 {
     char_u  *p = text;
@@ -2558,6 +2570,7 @@ barline_parse(vir_T *virp, char_u *text, garray_T *values)
     bval_T  *value;
     int	    i;
     int	    allocated = FALSE;
+    int	    eof;
 #ifdef FEAT_MBYTE
     char_u  *sconv;
     int	    converted;
@@ -2600,21 +2613,24 @@ barline_parse(vir_T *virp, char_u *text, garray_T *values)
 		 *     |{bartype},>{length of "{text}{text2}"}
 		 *     |<"{text1}
 		 *     |<{text2}",{value}
+		 * Length includes the quotes.
 		 */
 		++p;
 		len = getdigits(&p);
 		buf = alloc((int)(len + 1));
 		if (buf == NULL)
-		    return;
+		    return TRUE;
 		p = buf;
 		for (todo = len; todo > 0; todo -= n)
 		{
-		    if (viminfo_readline(virp) || virp->vir_line[0] != '|'
+		    eof = viminfo_readline(virp);
+		    if (eof || virp->vir_line[0] != '|'
 						  || virp->vir_line[1] != '<')
 		    {
-			/* file was truncated or garbled */
+			/* File was truncated or garbled. Read another line if
+			 * this one starts with '|'. */
 			vim_free(buf);
-			return;
+			return eof || virp->vir_line[0] == '|';
 		    }
 		    /* Get length of text, excluding |< and NL chars. */
 		    n = STRLEN(virp->vir_line);
@@ -2640,10 +2656,12 @@ barline_parse(vir_T *virp, char_u *text, garray_T *values)
 		 *     |{bartype},{lots of values},>
 		 *     |<{value},{value}
 		 */
-		if (viminfo_readline(virp) || virp->vir_line[0] != '|'
+		eof = viminfo_readline(virp);
+		if (eof || virp->vir_line[0] != '|'
 					      || virp->vir_line[1] != '<')
-		    /* file was truncated or garbled */
-		    return;
+		    /* File was truncated or garbled. Read another line if
+		     * this one starts with '|'. */
+		    return eof || virp->vir_line[0] == '|';
 		p = virp->vir_line + 2;
 	    }
 	}
@@ -2664,7 +2682,7 @@ barline_parse(vir_T *virp, char_u *text, garray_T *values)
 	    while (*p != '"')
 	    {
 		if (*p == NL || *p == NUL)
-		    return;  /* syntax error, drop the value */
+		    return TRUE;  /* syntax error, drop the value */
 		if (*p == '\\')
 		{
 		    ++p;
@@ -2723,6 +2741,7 @@ barline_parse(vir_T *virp, char_u *text, garray_T *values)
 	else
 	    break;
     }
+    return TRUE;
 }
 
     static int
@@ -2733,6 +2752,7 @@ read_viminfo_barline(vir_T *virp, int got_encoding, int force, int writing)
     garray_T	values;
     bval_T	*vp;
     int		i;
+    int		read_next = TRUE;
 
     /* The format is: |{bartype},{value},...
      * For a very long string:
@@ -2761,7 +2781,7 @@ read_viminfo_barline(vir_T *virp, int got_encoding, int force, int writing)
 		 * doesn't understand the version. */
 		if (!got_encoding)
 		{
-		    barline_parse(virp, p, &values);
+		    read_next = barline_parse(virp, p, &values);
 		    vp = (bval_T *)values.ga_data;
 		    if (values.ga_len > 0 && vp->bv_type == BVAL_NR)
 			virp->vir_version = vp->bv_nr;
@@ -2769,13 +2789,18 @@ read_viminfo_barline(vir_T *virp, int got_encoding, int force, int writing)
 		break;
 
 	    case BARTYPE_HISTORY:
-		barline_parse(virp, p, &values);
+		read_next = barline_parse(virp, p, &values);
 		handle_viminfo_history(&values, writing);
 		break;
 
 	    case BARTYPE_REGISTER:
-		barline_parse(virp, p, &values);
+		read_next = barline_parse(virp, p, &values);
 		handle_viminfo_register(&values, force);
+		break;
+
+	    case BARTYPE_MARK:
+		read_next = barline_parse(virp, p, &values);
+		handle_viminfo_mark(&values, force);
 		break;
 
 	    default:
@@ -2792,7 +2817,9 @@ read_viminfo_barline(vir_T *virp, int got_encoding, int force, int writing)
 	ga_clear(&values);
     }
 
-    return viminfo_readline(virp);
+    if (read_next)
+	return viminfo_readline(virp);
+    return FALSE;
 }
 
     static void

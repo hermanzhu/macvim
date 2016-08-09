@@ -851,7 +851,7 @@ alloc_clear(unsigned size)
     char_u *
 alloc_check(unsigned size)
 {
-#if !defined(UNIX) && !defined(__EMX__)
+#if !defined(UNIX)
     if (sizeof(int) == 2 && size > 0x7fff)
     {
 	/* Don't hide this message */
@@ -1173,9 +1173,12 @@ free_all_mem(void)
 #endif
     for (buf = firstbuf; buf != NULL; )
     {
+	bufref_T    bufref;
+
+	set_bufref(&bufref, buf);
 	nextbuf = buf->b_next;
 	close_buffer(NULL, buf, DOBUF_WIPE, FALSE);
-	if (buf_valid(buf))
+	if (bufref_valid(&bufref))
 	    buf = nextbuf;	/* didn't work, try next one */
 	else
 	    buf = firstbuf;
@@ -1214,11 +1217,18 @@ free_all_mem(void)
 	if (delete_first_msg() == FAIL)
 	    break;
 
+# ifdef FEAT_JOB_CHANNEL
+    channel_free_all();
+# endif
+#ifdef FEAT_TIMERS
+    timer_free_all();
+#endif
 # ifdef FEAT_EVAL
+    /* must be after channel_free_all() with unrefs partials */
     eval_clear();
 # endif
 # ifdef FEAT_JOB_CHANNEL
-    channel_free_all();
+    /* must be after eval_clear() with unrefs jobs */
     job_free_all();
 # endif
 
@@ -2725,7 +2735,7 @@ find_special_key(
     int		modifiers;
     int		bit;
     int		key;
-    unsigned long n;
+    uvarnumber_T	n;
     int		l;
 
     src = *srcp;
@@ -2747,8 +2757,10 @@ find_special_key(
 		else
 #endif
 		    l = 1;
-		if (bp[l + 1] == '>')
-		    bp += l;	/* anything accepted, like <C-?> */
+		/* Anything accepted, like <C-?>, except <C-">, because the "
+		 * ends the string. */
+		if (bp[l] != '"' && bp[l + 1] == '>')
+		    bp += l;
 	    }
 	}
 	if (bp[0] == 't' && bp[1] == '_' && bp[2] && bp[3])
@@ -5051,7 +5063,7 @@ ff_check_visited(
 {
     ff_visited_T	*vp;
 #ifdef UNIX
-    struct stat		st;
+    stat_T		st;
     int			url = FALSE;
 #endif
 

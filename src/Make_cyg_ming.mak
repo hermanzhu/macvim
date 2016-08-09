@@ -42,7 +42,8 @@ DIRECTX=no
 FEATURES=HUGE
 # Set to one of i386, i486, i586, i686 as the minimum target processor.
 # For amd64/x64 architecture set ARCH=x86-64 .
-ARCH=i686
+# If not set, it will be automatically detected. (Normally i686 or x86-64.)
+#ARCH=i686
 # Set to yes to cross-compile from unix; no=native Windows (and Cygwin).
 CROSS=no
 # Set to path to iconv.h and libiconv.a to enable using 'iconv.dll'.
@@ -111,6 +112,46 @@ INTLLIB=gnu_gettext
 #DYNAMIC_GETTEXT=DYNAMIC_GETTEXT
 #INTLPATH=$(GETTEXT)/lib
 #INTLLIB=intl
+
+
+# Command definitions (depends on cross-compiling and shell)
+ifeq ($(CROSS),yes)
+# cross-compiler prefix:
+ifndef CROSS_COMPILE
+CROSS_COMPILE = i586-pc-mingw32msvc-
+endif
+DEL = rm
+MKDIR = mkdir -p
+DIRSLASH = /
+else
+# normal (Windows) compilation:
+ifndef CROSS_COMPILE
+CROSS_COMPILE =
+endif
+ifneq (sh.exe, $(SHELL))
+DEL = rm
+MKDIR = mkdir -p
+DIRSLASH = /
+else
+DEL = del
+MKDIR = mkdir
+DIRSLASH = \\
+endif
+endif
+CC := $(CROSS_COMPILE)gcc
+CXX := $(CROSS_COMPILE)g++
+ifeq ($(UNDER_CYGWIN),yes)
+WINDRES := $(CROSS_COMPILE)windres
+else
+WINDRES := windres
+endif
+WINDRES_CC = $(CC)
+
+# Get the default ARCH.
+ifndef ARCH
+ARCH := $(shell $(CC) -dumpmachine | sed -e 's/-.*//' -e 's/_/-/' -e 's/^mingw32$$/i686/')
+endif
+
 
 #	Perl interface:
 #	  PERL=[Path to Perl directory] (Set inside Make_cyg.mak or Make_ming.mak)
@@ -379,41 +420,10 @@ endif # RUBY
 # Any other defines can be included here.
 DEF_GUI=-DFEAT_GUI_W32 -DFEAT_CLIPBOARD
 DEFINES=-DWIN32 -DWINVER=$(WINVER) -D_WIN32_WINNT=$(WINVER) \
-	-DHAVE_PATHDEF -DFEAT_$(FEATURES)
+	-DHAVE_PATHDEF -DFEAT_$(FEATURES) -DHAVE_STDINT_H
 ifeq ($(ARCH),x86-64)
 DEFINES+=-DMS_WIN64
 endif
-ifeq ($(CROSS),yes)
-# cross-compiler prefix:
-ifndef CROSS_COMPILE
-CROSS_COMPILE = i586-pc-mingw32msvc-
-endif
-DEL = rm
-MKDIR = mkdir -p
-DIRSLASH = /
-else
-# normal (Windows) compilation:
-ifndef CROSS_COMPILE
-CROSS_COMPILE =
-endif
-ifneq (sh.exe, $(SHELL))
-DEL = rm
-MKDIR = mkdir -p
-DIRSLASH = /
-else
-DEL = del
-MKDIR = mkdir
-DIRSLASH = \\
-endif
-endif
-CC := $(CROSS_COMPILE)gcc
-CXX := $(CROSS_COMPILE)g++
-ifeq ($(UNDER_CYGWIN),yes)
-WINDRES := $(CROSS_COMPILE)windres
-else
-WINDRES := windres
-endif
-WINDRES_CC = $(CC)
 
 #>>>>> end of choices
 ###########################################################################
@@ -594,26 +604,31 @@ LIB = -lkernel32 -luser32 -lgdi32 -ladvapi32 -lcomdlg32 -lcomctl32 -lversion
 GUIOBJ =  $(OUTDIR)/gui.o $(OUTDIR)/gui_w32.o $(OUTDIR)/gui_beval.o $(OUTDIR)/os_w32exe.o
 CUIOBJ = $(OUTDIR)/iscygpty.o
 OBJ = \
+	$(OUTDIR)/arabic.o \
 	$(OUTDIR)/blowfish.o \
 	$(OUTDIR)/buffer.o \
 	$(OUTDIR)/charset.o \
 	$(OUTDIR)/crypt.o \
 	$(OUTDIR)/crypt_zip.o \
+	$(OUTDIR)/dict.o \
 	$(OUTDIR)/diff.o \
 	$(OUTDIR)/digraph.o \
 	$(OUTDIR)/edit.o \
 	$(OUTDIR)/eval.o \
+	$(OUTDIR)/evalfunc.o \
 	$(OUTDIR)/ex_cmds.o \
 	$(OUTDIR)/ex_cmds2.o \
 	$(OUTDIR)/ex_docmd.o \
 	$(OUTDIR)/ex_eval.o \
 	$(OUTDIR)/ex_getln.o \
+	$(OUTDIR)/farsi.o \
 	$(OUTDIR)/fileio.o \
 	$(OUTDIR)/fold.o \
 	$(OUTDIR)/getchar.o \
 	$(OUTDIR)/hardcopy.o \
 	$(OUTDIR)/hashtab.o \
 	$(OUTDIR)/json.o \
+	$(OUTDIR)/list.o \
 	$(OUTDIR)/main.o \
 	$(OUTDIR)/mark.o \
 	$(OUTDIR)/memfile.o \
@@ -638,11 +653,13 @@ OBJ = \
 	$(OUTDIR)/search.o \
 	$(OUTDIR)/sha256.o \
 	$(OUTDIR)/spell.o \
+	$(OUTDIR)/spellfile.o \
 	$(OUTDIR)/syntax.o \
 	$(OUTDIR)/tag.o \
 	$(OUTDIR)/term.o \
 	$(OUTDIR)/ui.o \
 	$(OUTDIR)/undo.o \
+	$(OUTDIR)/userfunc.o \
 	$(OUTDIR)/version.o \
 	$(OUTDIR)/vimrc.o \
 	$(OUTDIR)/window.o
@@ -891,7 +908,7 @@ if_perl.c: if_perl.xs typemap
 	     $(PERLTYPEMAP) if_perl.xs > $@
 
 $(OUTDIR)/iscygpty.o:	iscygpty.c $(CUI_INCL)
-	$(CC) -c $(CFLAGS) iscygpty.c -o $(OUTDIR)/iscygpty.o -D_WIN32_WINNT=0x0600 -DUSE_DYNFILEID -DENABLE_STUB_IMPL
+	$(CC) -c $(CFLAGS) iscygpty.c -o $(OUTDIR)/iscygpty.o -U_WIN32_WINNT -D_WIN32_WINNT=0x0600 -DUSE_DYNFILEID -DENABLE_STUB_IMPL
 
 $(OUTDIR)/main.o:		main.c $(INCL) $(CUI_INCL)
 	$(CC) -c $(CFLAGS) main.c -o $(OUTDIR)/main.o

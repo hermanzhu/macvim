@@ -501,6 +501,11 @@ OPTFLAG = $(OPTFLAG) /GL
 CFLAGS=$(CFLAGS) $(WP64CHECK)
 !endif
 
+# VC10 or later has stdint.h.
+!if $(MSVC_MAJOR) >= 10
+CFLAGS = $(CFLAGS) -DHAVE_STDINT_H
+!endif
+
 # Static code analysis generally available starting with VS2012 (VC11) or
 # Windows SDK 7.1 (VC10)
 !if ("$(ANALYZE)" == "yes") && ($(MSVC_MAJOR) >= 10)
@@ -543,26 +548,31 @@ INCL =	vim.h os_win32.h ascii.h feature.h globals.h keymap.h macros.h \
 	$(NBDEBUG_INCL)
 
 OBJ = \
+	$(OUTDIR)\arabic.obj \
 	$(OUTDIR)\blowfish.obj \
 	$(OUTDIR)\buffer.obj \
 	$(OUTDIR)\charset.obj \
 	$(OUTDIR)\crypt.obj \
 	$(OUTDIR)\crypt_zip.obj \
+	$(OUTDIR)\dict.obj \
 	$(OUTDIR)\diff.obj \
 	$(OUTDIR)\digraph.obj \
 	$(OUTDIR)\edit.obj \
 	$(OUTDIR)\eval.obj \
+	$(OUTDIR)\evalfunc.obj \
 	$(OUTDIR)\ex_cmds.obj \
 	$(OUTDIR)\ex_cmds2.obj \
 	$(OUTDIR)\ex_docmd.obj \
 	$(OUTDIR)\ex_eval.obj \
 	$(OUTDIR)\ex_getln.obj \
+	$(OUTDIR)\farsi.obj \
 	$(OUTDIR)\fileio.obj \
 	$(OUTDIR)\fold.obj \
 	$(OUTDIR)\getchar.obj \
 	$(OUTDIR)\hardcopy.obj \
 	$(OUTDIR)\hashtab.obj \
 	$(OUTDIR)\json.obj \
+	$(OUTDIR)\list.obj \
 	$(OUTDIR)\main.obj \
 	$(OUTDIR)\mark.obj \
 	$(OUTDIR)\mbyte.obj \
@@ -587,11 +597,13 @@ OBJ = \
 	$(OUTDIR)\search.obj \
 	$(OUTDIR)\sha256.obj \
 	$(OUTDIR)\spell.obj \
+	$(OUTDIR)\spellfile.obj \
 	$(OUTDIR)\syntax.obj \
 	$(OUTDIR)\tag.obj \
 	$(OUTDIR)\term.obj \
 	$(OUTDIR)\ui.obj \
 	$(OUTDIR)\undo.obj \
+	$(OUTDIR)\userfunc.obj \
 	$(OUTDIR)\window.obj \
 	$(OUTDIR)\vim.res
 
@@ -1143,6 +1155,8 @@ testclean:
 !ENDIF
 	$(CC) $(CFLAGS) $<
 
+$(OUTDIR)/arabic.obj:	$(OUTDIR) arabic.c  $(INCL)
+
 $(OUTDIR)/blowfish.obj:	$(OUTDIR) blowfish.c  $(INCL)
 
 $(OUTDIR)/buffer.obj:	$(OUTDIR) buffer.c  $(INCL)
@@ -1153,6 +1167,8 @@ $(OUTDIR)/crypt.obj:	$(OUTDIR) crypt.c  $(INCL)
 
 $(OUTDIR)/crypt_zip.obj: $(OUTDIR) crypt_zip.c  $(INCL)
 
+$(OUTDIR)/dict.obj:	$(OUTDIR) dict.c  $(INCL)
+
 $(OUTDIR)/diff.obj:	$(OUTDIR) diff.c  $(INCL)
 
 $(OUTDIR)/digraph.obj:	$(OUTDIR) digraph.c  $(INCL)
@@ -1160,6 +1176,8 @@ $(OUTDIR)/digraph.obj:	$(OUTDIR) digraph.c  $(INCL)
 $(OUTDIR)/edit.obj:	$(OUTDIR) edit.c  $(INCL)
 
 $(OUTDIR)/eval.obj:	$(OUTDIR) eval.c  $(INCL)
+
+$(OUTDIR)/evalfunc.obj:	$(OUTDIR) evalfunc.c  $(INCL)
 
 $(OUTDIR)/ex_cmds.obj:	$(OUTDIR) ex_cmds.c  $(INCL)
 
@@ -1170,6 +1188,8 @@ $(OUTDIR)/ex_docmd.obj:	$(OUTDIR) ex_docmd.c  $(INCL) ex_cmds.h
 $(OUTDIR)/ex_eval.obj:	$(OUTDIR) ex_eval.c  $(INCL) ex_cmds.h
 
 $(OUTDIR)/ex_getln.obj:	$(OUTDIR) ex_getln.c  $(INCL)
+
+$(OUTDIR)/farsi.obj:	$(OUTDIR) farsi.c  $(INCL)
 
 $(OUTDIR)/fileio.obj:	$(OUTDIR) fileio.c  $(INCL)
 
@@ -1230,6 +1250,8 @@ $(OUTDIR)/iscygpty.obj:	$(OUTDIR) iscygpty.c $(CUI_INCL)
 
 $(OUTDIR)/json.obj:	$(OUTDIR) json.c  $(INCL)
 
+$(OUTDIR)/list.obj:	$(OUTDIR) list.c  $(INCL)
+
 $(OUTDIR)/main.obj:	$(OUTDIR) main.c  $(INCL) $(CUI_INCL)
 
 $(OUTDIR)/mark.obj:	$(OUTDIR) mark.c  $(INCL)
@@ -1285,6 +1307,8 @@ $(OUTDIR)/sha256.obj:	$(OUTDIR) sha256.c  $(INCL)
 
 $(OUTDIR)/spell.obj:	$(OUTDIR) spell.c  $(INCL)
 
+$(OUTDIR)/spellfile.obj:	$(OUTDIR) spellfile.c  $(INCL)
+
 $(OUTDIR)/syntax.obj:	$(OUTDIR) syntax.c  $(INCL)
 
 $(OUTDIR)/tag.obj:	$(OUTDIR) tag.c  $(INCL)
@@ -1294,6 +1318,8 @@ $(OUTDIR)/term.obj:	$(OUTDIR) term.c  $(INCL)
 $(OUTDIR)/ui.obj:	$(OUTDIR) ui.c  $(INCL)
 
 $(OUTDIR)/undo.obj:	$(OUTDIR) undo.c  $(INCL)
+
+$(OUTDIR)/userfunc.obj:	$(OUTDIR) userfunc.c  $(INCL)
 
 $(OUTDIR)/window.obj:	$(OUTDIR) window.c  $(INCL)
 
@@ -1341,25 +1367,30 @@ auto:
 
 # End Custom Build
 proto.h: \
+	proto/arabic.pro \
 	proto/blowfish.pro \
 	proto/buffer.pro \
 	proto/charset.pro \
 	proto/crypt.pro \
 	proto/crypt_zip.pro \
+	proto/dict.pro \
 	proto/diff.pro \
 	proto/digraph.pro \
 	proto/edit.pro \
 	proto/eval.pro \
+	proto/evalfunc.pro \
 	proto/ex_cmds.pro \
 	proto/ex_cmds2.pro \
 	proto/ex_docmd.pro \
 	proto/ex_eval.pro \
 	proto/ex_getln.pro \
+	proto/farsi.pro \
 	proto/fileio.pro \
 	proto/getchar.pro \
 	proto/hardcopy.pro \
 	proto/hashtab.pro \
 	proto/json.pro \
+	proto/list.pro \
 	proto/main.pro \
 	proto/mark.pro \
 	proto/memfile.pro \
@@ -1383,11 +1414,13 @@ proto.h: \
 	proto/search.pro \
 	proto/sha256.pro \
 	proto/spell.pro \
+	proto/spellfile.pro \
 	proto/syntax.pro \
 	proto/tag.pro \
 	proto/term.pro \
 	proto/ui.pro \
 	proto/undo.pro \
+	proto/userfunc.pro \
 	proto/window.pro \
 	$(NETBEANS_PRO) \
 	$(CHANNEL_PRO)

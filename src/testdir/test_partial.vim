@@ -1,5 +1,5 @@
 " Test binding arguments to a Funcref.
-
+ 
 func MyFunc(arg1, arg2, arg3)
   return a:arg1 . '/' . a:arg2 . '/' . a:arg3
 endfunc
@@ -12,6 +12,14 @@ func MySort(up, one, two)
     return a:one > a:two ? 1 : -1
   endif
   return a:one < a:two ? 1 : -1
+endfunc
+
+func MyMap(sub, index, val)
+  return a:val - a:sub
+endfunc
+
+func MyFilter(threshold, index, val)
+  return a:val > a:threshold
 endfunc
 
 func Test_partial_args()
@@ -36,6 +44,16 @@ func Test_partial_args()
   call assert_equal([1, 2, 3], sort([3, 1, 2], Sort))
   let Sort = function('MySort', [0])
   call assert_equal([3, 2, 1], sort([3, 1, 2], Sort))
+
+  let Map = function('MyMap', [2])
+  call assert_equal([-1, 0, 1], map([1, 2, 3], Map))
+  let Map = function('MyMap', [3])
+  call assert_equal([-2, -1, 0], map([1, 2, 3], Map))
+
+  let Filter = function('MyFilter', [1])
+  call assert_equal([2, 3], filter([1, 2, 3], Filter))
+  let Filter = function('MyFilter', [2])
+  call assert_equal([3], filter([1, 2, 3], Filter))
 endfunc
 
 func MyDictFunc(arg1, arg2) dict
@@ -59,6 +77,9 @@ func Test_partial_dict()
   let Cb = function('MyDictFunc', dict)
   call assert_equal("hello/xxx/yyy", Cb("xxx", "yyy"))
   call assert_fails('Cb("fff")', 'E492:')
+
+  let Cb = function('MyDictFunc', dict)
+  call assert_equal({"foo": "hello/foo/1", "bar": "hello/bar/2"}, map({"foo": 1, "bar": 2}, Cb))
 
   let dict = {"tr": function('tr', ['hello', 'h', 'H'])}
   call assert_equal("Hello", dict.tr())
@@ -246,25 +267,6 @@ func Test_cycle_partial_job()
   if has('job')
     let job = job_start('echo')
     call job_setoptions(job, {'exit_cb': function('Ignored', [job])})
-    unlet job
-  endif
-endfunc
-
-func Test_job_start_fails()
-  if has('job')
-    let job = job_start('axdfxsdf')
-    for i in range(100)
-      let status = job_status(job)
-      if status == 'dead' || status == 'fail'
-	break
-      endif
-      sleep 10m
-    endfor
-    if has('unix')
-      call assert_equal('dead', job_status(job))
-    else
-      call assert_equal('fail', job_status(job))
-    endif
     unlet job
   endif
 endfunc

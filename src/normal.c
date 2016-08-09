@@ -414,8 +414,8 @@ static const struct nv_cmd
     {K_TABMENU, nv_tabmenu,	0,			0},
 #endif
 #ifdef FEAT_FKMAP
-    {K_F8,	farsi_fkey,	0,			0},
-    {K_F9,	farsi_fkey,	0,			0},
+    {K_F8,	farsi_f8,	0,			0},
+    {K_F9,	farsi_f9,	0,			0},
 #endif
 #ifdef FEAT_NETBEANS_INTG
     {K_F21,	nv_nbcmd,	NV_NCH_ALW,		0},
@@ -4078,7 +4078,7 @@ check_scrollbind(linenr_T topline_diff, long leftcol_diff)
      * loop through the scrollbound windows and scroll accordingly
      */
     VIsual_select = VIsual_active = 0;
-    for (curwin = firstwin; curwin; curwin = curwin->w_next)
+    FOR_ALL_WINDOWS(curwin)
     {
 	curbuf = curwin->w_buffer;
 	/* skip original window  and windows with 'noscrollbind' */

@@ -571,7 +571,7 @@ gui_init(void)
 	    {
 #ifdef UNIX
 		{
-		    struct stat s;
+		    stat_T s;
 
 		    /* if ".gvimrc" file is not owned by user, set 'secure'
 		     * mode */
@@ -1790,7 +1790,7 @@ gui_write(
 	if (s[0] == ESC && s[1] == '|')
 	{
 	    p = s + 2;
-	    if (VIM_ISDIGIT(*p))
+	    if (VIM_ISDIGIT(*p) || (*p == '-' && VIM_ISDIGIT(*(p + 1))))
 	    {
 		arg1 = getdigits(&p);
 		if (p > s + len)
@@ -4130,7 +4130,7 @@ gui_drag_scrollbar(scrollbar_T *sb, long value, int still_dragging)
     {
 	do_check_scrollbind(TRUE);
 	/* need to update the window right here */
-	for (wp = firstwin; wp != NULL; wp = wp->w_next)
+	FOR_ALL_WINDOWS(wp)
 	    if (wp->w_redr_type > 0)
 		updateWindow(wp);
 	setcursor();

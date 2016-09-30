@@ -1,4 +1,4 @@
-/* vi:set ts=8 sts=4 sw=4:
+/* vi:set ts=8 sts=4 sw=4 noet:
  *
  * VIM - Vi IMproved	by Bram Moolenaar
  *
@@ -3907,7 +3907,7 @@ ins_compl_prep(int c)
 
 	    /* CTRL-E means completion is Ended, go back to the typed text.
 	     * but only do this, if the Popup is still visible */
-	    if (c == Ctrl_E && pum_visible())
+	    if (c == Ctrl_E)
 	    {
 		ins_compl_delete();
 		if (compl_leader != NULL)
@@ -5318,7 +5318,7 @@ ins_complete(int c, int enable_pum)
 	    if (compl_pattern == NULL)
 		return FAIL;
 	    set_cmd_context(&compl_xp, compl_pattern,
-				     (int)STRLEN(compl_pattern), curs_col);
+				  (int)STRLEN(compl_pattern), curs_col, FALSE);
 	    if (compl_xp.xp_context == EXPAND_UNSUCCESSFUL
 		    || compl_xp.xp_context == EXPAND_NOTHING)
 		/* No completion possible, use an empty pattern to get a
@@ -6775,11 +6775,7 @@ comp_textwidth(
 	textwidth -= curwin->w_p_fdc;
 #endif
 #ifdef FEAT_SIGNS
-	if (curwin->w_buffer->b_signlist != NULL
-# ifdef FEAT_NETBEANS_INTG
-			  || curwin->w_buffer->b_has_sign_column
-# endif
-		    )
+	if (signcolumn_on(curwin))
 	    textwidth -= 1;
 #endif
 	if (curwin->w_p_nu || curwin->w_p_rnu)

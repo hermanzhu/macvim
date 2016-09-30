@@ -1429,12 +1429,10 @@ function! Test_two_windows()
   laddexpr 'one.txt:3:one one one'
 
   let loc_one = getloclist(one_id)
-echo string(loc_one)
   call assert_equal('Xone/a/one.txt', bufname(loc_one[1].bufnr))
   call assert_equal(3, loc_one[1].lnum)
 
   let loc_two = getloclist(two_id)
-echo string(loc_two)
   call assert_equal('Xtwo/a/two.txt', bufname(loc_two[1].bufnr))
   call assert_equal(5, loc_two[1].lnum)
 
@@ -1505,3 +1503,92 @@ func Test_duplicate_buf()
 
   call delete('Xgrepthis')
 endfunc
+
+" Quickfix/Location list set/get properties tests
+function Xproperty_tests(cchar)
+    call s:setup_commands(a:cchar)
+
+    " Error cases
+    call assert_fails('call g:Xgetlist(99)', 'E715:')
+    call assert_fails('call g:Xsetlist(99)', 'E714:')
+    call assert_fails('call g:Xsetlist([], "a", [])', 'E715:')
+
+    " Set and get the title
+    Xopen
+    wincmd p
+    call g:Xsetlist([{'filename':'foo', 'lnum':27}])
+    call g:Xsetlist([], 'a', {'title' : 'Sample'})
+    let d = g:Xgetlist({"title":1})
+    call assert_equal('Sample', d.title)
+
+    Xopen
+    call assert_equal('Sample', w:quickfix_title)
+    Xclose
+
+    " Tests for action argument
+    silent! Xolder 999
+    let qfnr = g:Xgetlist({'all':1}).nr
+    call g:Xsetlist([], 'r', {'title' : 'N1'})
+    call assert_equal('N1', g:Xgetlist({'all':1}).title)
+    call g:Xsetlist([], ' ', {'title' : 'N2'})
+    call assert_equal(qfnr + 1, g:Xgetlist({'all':1}).nr)
+
+    let res = g:Xgetlist({'nr': 0})
+    call assert_equal(qfnr + 1, res.nr)
+    call assert_equal(['nr'], keys(res))
+
+    call g:Xsetlist([], ' ', {'title' : 'N3'})
+    call assert_equal('N2', g:Xgetlist({'nr':2, 'title':1}).title)
+
+    " Invalid arguments
+    call assert_fails('call g:Xgetlist([])', 'E715')
+    call assert_fails('call g:Xsetlist([], "a", [])', 'E715')
+    let s = g:Xsetlist([], 'a', {'abc':1})
+    call assert_equal(-1, s)
+
+    call assert_equal({}, g:Xgetlist({'abc':1}))
+
+    if a:cchar == 'l'
+	call assert_equal({}, getloclist(99, {'title': 1}))
+    endif
+endfunction
+
+function Test_qf_property()
+    call Xproperty_tests('c')
+    call Xproperty_tests('l')
+endfunction
+
+" Tests for the QuickFixCmdPre/QuickFixCmdPost autocommands
+function QfAutoCmdHandler(loc, cmd)
+  call add(g:acmds, a:loc . a:cmd)
+endfunction
+
+function Test_Autocmd()
+  autocmd QuickFixCmdPre * call QfAutoCmdHandler('pre', expand('<amatch>'))
+  autocmd QuickFixCmdPost * call QfAutoCmdHandler('post', expand('<amatch>'))
+
+  let g:acmds = []
+  cexpr "F1:10:Line 10"
+  caddexpr "F1:20:Line 20"
+  cgetexpr "F1:30:Line 30"
+  enew! | call append(0, "F2:10:Line 10")
+  cbuffer!
+  enew! | call append(0, "F2:20:Line 20")
+  cgetbuffer
+  enew! | call append(0, "F2:30:Line 30")
+  caddbuffer
+
+  let l = ['precexpr',
+	      \ 'postcexpr',
+	      \ 'precaddexpr',
+	      \ 'postcaddexpr',
+	      \ 'precgetexpr',
+	      \ 'postcgetexpr',
+	      \ 'precbuffer',
+	      \ 'postcbuffer',
+	      \ 'precgetbuffer',
+	      \ 'postcgetbuffer',
+	      \ 'precaddbuffer',
+	      \ 'postcaddbuffer']
+  call assert_equal(l, g:acmds)
+endfunction
